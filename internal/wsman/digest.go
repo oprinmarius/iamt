@@ -11,6 +11,15 @@ import (
 	"strings"
 )
 
+// Package level compiled regexes to avoid recompilation on each call.
+var (
+	// digestFieldRe extracts key="value" pairs from digest auth headers.
+	// Handles both comma-separated and space-separated fields.
+	digestFieldRe = regexp.MustCompile(`(\w+)="([^"]*)"`)
+	// qopSplitRe splits qop values by whitespace or commas.
+	qopSplitRe = regexp.MustCompile(`[\s,]+`)
+)
+
 type challenge struct {
 	Username   string
 	Password   string
@@ -99,10 +108,10 @@ func (c *challenge) authorize(method, uri string) (string, error) {
 	return fmt.Sprintf("Digest %s", strings.Join(sl, ",")), nil
 }
 
-// origin https://code.google.com/p/mlab-ns2/source/browse/gae/ns/digest/digest.go#90
-// Modified to handle malformed Intel AMT headers:
-// - Space-separated fields instead of comma-separated
-// - Malformed qop values like "auth auth-int  auth"
+// parseChallenge is based on https://code.google.com/p/mlab-ns2/source/browse/gae/ns/digest/digest.go#90
+// but modified to handle malformed Intel AMT headers:
+//   - Space-separated fields instead of comma-separated.
+//   - Malformed qop values like "auth auth-int  auth".
 func (c *challenge) parseChallenge(input string) error {
 	const ws = " \n\r\t"
 	s := strings.Trim(input, ws)
@@ -112,15 +121,10 @@ func (c *challenge) parseChallenge(input string) error {
 	s = strings.Trim(s[7:], ws)
 	c.Algorithm = "MD5"
 
-	// Use regex to extract key="value" pairs
-	// This handles both comma-separated and space-separated fields
-	re := regexp.MustCompile(`(\w+)="([^"]*)"`)
-	matches := re.FindAllStringSubmatch(s, -1)
+	matches := digestFieldRe.FindAllStringSubmatch(s, -1)
 
 	for _, match := range matches {
-		if len(match) != 3 {
-			continue
-		}
+		// match is [fullMatch, key, value] from the regex (\w+)="([^"]*)".
 		key := strings.TrimSpace(match[1])
 		value := match[2]
 
@@ -148,8 +152,7 @@ func (c *challenge) parseChallenge(input string) error {
 // Some Intel NUCs return qop like "auth auth-int  auth" (space-separated with
 // duplicates and extra whitespace) instead of the standard comma-separated format.
 func normalizeQop(qop string) string {
-	re := regexp.MustCompile(`[\s,]+`)
-	parts := re.Split(qop, -1)
+	parts := qopSplitRe.Split(qop, -1)
 	for _, p := range parts {
 		if p == "auth" {
 			return "auth"
