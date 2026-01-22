@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-// Package level compiled regexes to avoid recompilation on each call.
+// Package level compiled regular expressions to avoid recompilation on each call.
 var (
 	// digestFieldRe extracts key="value" pairs from digest auth headers.
 	// Handles both comma-separated and space-separated fields.
@@ -151,6 +151,7 @@ func (c *challenge) parseChallenge(input string) error {
 // normalizeQop handles malformed qop values from some Intel AMT implementations.
 // Some Intel NUCs return qop like "auth auth-int  auth" (space-separated with
 // duplicates and extra whitespace) instead of the standard comma-separated format.
+// If "auth" is not found, returns empty string to fall back to no-qop behavior.
 func normalizeQop(qop string) string {
 	parts := qopSplitRe.Split(qop, -1)
 	for _, p := range parts {
@@ -158,5 +159,5 @@ func normalizeQop(qop string) string {
 			return "auth"
 		}
 	}
-	return qop
+	return ""
 }
