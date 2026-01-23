@@ -122,7 +122,7 @@ func (c *challenge) parseChallenge(input string) error {
 	matches := digestFieldRe.FindAllStringSubmatch(s, -1)
 
 	for _, match := range matches {
-		// match is [fullMatch, key, value] from the regex (\w+)="([^"]*)".
+		// match is [fullMatch, key, value] from the regex (\w+)="((?:\\.|[^"\\])*)", which supports escaped characters in values.
 		key := strings.TrimSpace(match[1])
 		value := match[2]
 
