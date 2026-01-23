@@ -38,3 +38,53 @@ func TestIsPoweredOnGivenStatus_When_powerStateOffSoft_Expect_False(t *testing.T
 	actual := isPoweredOnGivenStatus(logr.Discard(), status)
 	assert.Equal(t, false, actual)
 }
+
+func TestContainsPowerState_When_StateIsPresent_Expect_True(t *testing.T) {
+	states := []powerState{stateOn, offSoft, offHard}
+	assert.True(t, containspowerState(states, offSoft))
+}
+
+func TestContainsPowerState_When_StateIsNotPresent_Expect_False(t *testing.T) {
+	states := []powerState{stateOn, offSoft, offHard}
+	assert.False(t, containspowerState(states, hibernateOffSoft))
+}
+
+func TestContainsPowerState_When_EmptySlice_Expect_False(t *testing.T) {
+	states := []powerState{}
+	assert.False(t, containspowerState(states, stateOn))
+}
+
+func TestGetPowerOffStates_Returns_ExpectedStates(t *testing.T) {
+	states := getPowerOffStates()
+	assert.Len(t, states, 4)
+	assert.Contains(t, states, offSoftGraceful)
+	assert.Contains(t, states, offSoft)
+	assert.Contains(t, states, offHardGraceful)
+	assert.Contains(t, states, offHard)
+}
+
+func TestGetPowerCycleStates_Returns_ExpectedStates(t *testing.T) {
+	states := getPowerCycleStates()
+	assert.Len(t, states, 6)
+	assert.Contains(t, states, powerCycleOffSoftGraceful)
+	assert.Contains(t, states, powerCycleOffSoft)
+	assert.Contains(t, states, masterBusResetGraceful)
+	assert.Contains(t, states, powerCycleOffHardGraceful)
+	assert.Contains(t, states, powerCycleOffHard)
+	assert.Contains(t, states, masterBusReset)
+}
+
+func TestIsPoweredOnGivenStatus_AllOffStates_ReturnFalse(t *testing.T) {
+	offStates := []powerState{
+		unknown, other, sleepLight, sleepDeep, powerCycleOffSoft,
+		offHard, hibernateOffSoft, offSoft, powerCycleOffHard,
+		masterBusReset, diagnosticInterruptNMI, offSoftGraceful,
+		offHardGraceful, masterBusResetGraceful, powerCycleOffSoftGraceful,
+		powerCycleOffHardGraceful, diagnosticInterruptInit,
+	}
+	for _, state := range offStates {
+		status := &powerStatus{powerState: state}
+		actual := isPoweredOnGivenStatus(logr.Discard(), status)
+		assert.False(t, actual, "expected state %v to be considered off", state)
+	}
+}

@@ -40,14 +40,13 @@ func (c *Client) setBootConfigRole(ctx context.Context, role bootConfigRole) err
 func (c *Client) changeBootOrder(ctx context.Context, items []string) error {
 	message := c.WsmanClient.Invoke(resourceCIMBootConfigSetting, "ChangeBootOrder")
 
-	if len(items) > 0 {
-		// TODO: multiple?
-		pxeEndpointRef, err := c.getBootSourceRef(ctx, "Intel(r) AMT: Force PXE Boot")
+	for _, item := range items {
+		endpointRef, err := c.getBootSourceRef(ctx, item)
 		if err != nil {
 			return err
 		}
 		sourceParam := message.MakeParameter("Source")
-		sourceParam.AddChildren(pxeEndpointRef.Children()...)
+		sourceParam.AddChildren(endpointRef.Children()...)
 		message.AddParameter(sourceParam)
 	}
 

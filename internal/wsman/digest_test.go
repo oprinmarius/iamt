@@ -1,6 +1,9 @@
 package wsman
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseChallenge(t *testing.T) {
 	tests := []struct {
@@ -153,6 +156,256 @@ func TestNormalizeQop(t *testing.T) {
 			got := normalizeQop(tt.input)
 			if got != tt.want {
 				t.Errorf("normalizeQop(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestH(t *testing.T) {
+	// MD5("") = d41d8cd98f00b204e9800998ecf8427e
+	if got := h(""); got != "d41d8cd98f00b204e9800998ecf8427e" {
+		t.Errorf("h(\"\") = %q, want d41d8cd98f00b204e9800998ecf8427e", got)
+	}
+	// MD5("test") = 098f6bcd4621d373cade4e832627b4f6
+	if got := h("test"); got != "098f6bcd4621d373cade4e832627b4f6" {
+		t.Errorf("h(\"test\") = %q, want 098f6bcd4621d373cade4e832627b4f6", got)
+	}
+}
+
+func TestKD(t *testing.T) {
+	// kd("secret", "data") = h("secret:data")
+	expected := h("secret:data")
+	if got := kd("secret", "data"); got != expected {
+		t.Errorf("kd(\"secret\", \"data\") = %q, want %q", got, expected)
+	}
+}
+
+func TestChallengeHA1(t *testing.T) {
+	c := &challenge{
+		Username: "admin",
+		Realm:    "Digest:12345",
+		Password: "password",
+	}
+	// HA1 = MD5(username:realm:password)
+	expected := h("admin:Digest:12345:password")
+	if got := c.ha1(); got != expected {
+		t.Errorf("ha1() = %q, want %q", got, expected)
+	}
+}
+
+func TestChallengeHA2(t *testing.T) {
+	c := &challenge{}
+	// HA2 = MD5(method:uri)
+	expected := h("POST:/wsman")
+	if got := c.ha2("POST", "/wsman"); got != expected {
+		t.Errorf("ha2() = %q, want %q", got, expected)
+	}
+}
+
+func TestChallengeResp(t *testing.T) {
+	tests := []struct {
+		name    string
+		qop     string
+		cnonce  string
+		wantErr bool
+	}{
+		{
+			name:    "qop auth with provided cnonce",
+			qop:     "auth",
+			cnonce:  "testcnonce",
+			wantErr: false,
+		},
+		{
+			name:    "qop auth without cnonce generates one",
+			qop:     "auth",
+			cnonce:  "",
+			wantErr: false,
+		},
+		{
+			name:    "empty qop uses simpler response",
+			qop:     "",
+			cnonce:  "",
+			wantErr: false,
+		},
+		{
+			name:    "unsupported qop returns error",
+			qop:     "auth-int",
+			cnonce:  "",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &challenge{
+				Username:   "admin",
+				Realm:      "test",
+				Password:   "password",
+				Nonce:      "servernonce",
+				Qop:        tt.qop,
+				NonceCount: 0,
+			}
+			resp, err := c.resp("POST", "/wsman", tt.cnonce)
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+				return
+			}
+			if resp == "" {
+				t.Error("expected non-empty response")
+			}
+			if tt.qop == "auth" && tt.cnonce != "" && c.Cnonce != tt.cnonce {
+				t.Errorf("Cnonce = %q, want %q", c.Cnonce, tt.cnonce)
+			}
+			if tt.qop == "auth" && tt.cnonce == "" && c.Cnonce == "" {
+				t.Error("expected Cnonce to be generated")
+			}
+			if c.NonceCount != 1 {
+				t.Errorf("NonceCount = %d, want 1", c.NonceCount)
+			}
+		})
+	}
+}
+
+func TestChallengeAuthorize(t *testing.T) {
+	tests := []struct {
+		name      string
+		challenge *challenge
+		method    string
+		uri       string
+		wantErr   bool
+		checkFunc func(t *testing.T, auth string)
+	}{
+		{
+			name: "MD5 with qop auth",
+			challenge: &challenge{
+				Username:   "admin",
+				Password:   "password",
+				Realm:      "Digest:12345",
+				Nonce:      "servernonce123",
+				Algorithm:  "MD5",
+				Qop:        "auth",
+				NonceCount: 0,
+			},
+			method:  "POST",
+			uri:     "/wsman",
+			wantErr: false,
+			checkFunc: func(t *testing.T, auth string) {
+				if !strings.HasPrefix(auth, "Digest ") {
+					t.Error("auth should start with 'Digest '")
+				}
+				requiredFields := []string{
+					`username="admin"`,
+					`realm="Digest:12345"`,
+					`nonce="servernonce123"`,
+					`uri="/wsman"`,
+					`algorithm="MD5"`,
+					"qop=auth",
+					"nc=00000001",
+				}
+				for _, field := range requiredFields {
+					if !strings.Contains(auth, field) {
+						t.Errorf("auth missing %q: %s", field, auth)
+					}
+				}
+			},
+		},
+		{
+			name: "MD5 without qop",
+			challenge: &challenge{
+				Username:   "admin",
+				Password:   "password",
+				Realm:      "test",
+				Nonce:      "nonce",
+				Algorithm:  "MD5",
+				Qop:        "",
+				NonceCount: 0,
+			},
+			method:  "POST",
+			uri:     "/wsman",
+			wantErr: false,
+			checkFunc: func(t *testing.T, auth string) {
+				if strings.Contains(auth, "qop=") {
+					t.Error("auth should not contain qop when Qop is empty")
+				}
+				if strings.Contains(auth, "nc=") {
+					t.Error("auth should not contain nc when Qop is empty")
+				}
+				if strings.Contains(auth, "cnonce=") {
+					t.Error("auth should not contain cnonce when Qop is empty")
+				}
+			},
+		},
+		{
+			name: "with opaque",
+			challenge: &challenge{
+				Username:   "admin",
+				Password:   "password",
+				Realm:      "test",
+				Nonce:      "nonce",
+				Algorithm:  "MD5",
+				Qop:        "auth",
+				Opaque:     "opaque123",
+				NonceCount: 0,
+			},
+			method:  "POST",
+			uri:     "/wsman",
+			wantErr: false,
+			checkFunc: func(t *testing.T, auth string) {
+				if !strings.Contains(auth, `opaque="opaque123"`) {
+					t.Error("auth should contain opaque field")
+				}
+			},
+		},
+		{
+			name: "non-MD5 algorithm fails",
+			challenge: &challenge{
+				Username:  "admin",
+				Password:  "password",
+				Realm:     "test",
+				Nonce:     "nonce",
+				Algorithm: "SHA256",
+			},
+			method:  "POST",
+			uri:     "/wsman",
+			wantErr: true,
+		},
+		{
+			name: "auth-int qop fails",
+			challenge: &challenge{
+				Username:  "admin",
+				Password:  "password",
+				Realm:     "test",
+				Nonce:     "nonce",
+				Algorithm: "MD5",
+				Qop:       "auth-int",
+			},
+			method:  "POST",
+			uri:     "/wsman",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			auth, err := tt.challenge.authorize(tt.method, tt.uri)
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("unexpected error: %v", err)
+				return
+			}
+			if tt.checkFunc != nil {
+				tt.checkFunc(t, auth)
 			}
 		})
 	}

@@ -118,6 +118,8 @@ func (c *challenge) parseChallenge(input string) error {
 	}
 	s = strings.Trim(s[7:], ws)
 	c.Algorithm = "MD5"
+	// Reset nonce count when receiving a new challenge (new nonce).
+	c.NonceCount = 0
 
 	matches := digestFieldRe.FindAllStringSubmatch(s, -1)
 

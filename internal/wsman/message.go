@@ -306,8 +306,9 @@ func (m *Message) Send(ctx context.Context) (*Message, error) {
 	}
 	msg := &Message{Message: res, client: m.client}
 	if m.replyHelper != nil {
-		// TODO: figure out how to handle this error
-		_ = m.replyHelper(ctx, m, msg)
+		if err := m.replyHelper(ctx, m, msg); err != nil {
+			return msg, err
+		}
 	}
 	if msg.Fault() != nil {
 		return msg, errors.New("SOAP Fault")
