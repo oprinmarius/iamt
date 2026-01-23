@@ -11,13 +11,11 @@ import (
 	"strings"
 )
 
-// Package level compiled regular expressions to avoid recompilation on each call.
+// Package level compiled regular expressions to avoid compilation on each call.
 var (
 	// digestFieldRe extracts key="value" pairs from digest auth headers.
-	// Handles both comma-separated and space-separated fields.
-	digestFieldRe = regexp.MustCompile(`(\w+)="([^"]*)"`)
-	// qopSplitRe splits qop values by whitespace or commas.
-	qopSplitRe = regexp.MustCompile(`[\s,]+`)
+	// Handles both comma-separated and space-separated fields, and supports escaped quotes in values.
+	digestFieldRe = regexp.MustCompile(`(\w+)="((?:\\.|[^"\\])*)"`)
 )
 
 type challenge struct {
@@ -153,11 +151,11 @@ func (c *challenge) parseChallenge(input string) error {
 // duplicates and extra whitespace) instead of the standard comma-separated format.
 // If "auth" is not found, returns empty string to fall back to no-qop behavior.
 func normalizeQop(qop string) string {
-	parts := qopSplitRe.Split(qop, -1)
-	for _, p := range parts {
-		if p == "auth" {
-			return "auth"
-		}
+	// Normalize separators and pad with spaces for word boundary check.
+	// This avoids array allocation from splitting.
+	padded := " " + strings.ReplaceAll(qop, ",", " ") + " "
+	if strings.Contains(padded, " auth ") {
+		return "auth"
 	}
 	return ""
 }
